@@ -1,0 +1,82 @@
+{% extends 'base/layout.html' %}
+{% load helpers %}
+
+{% block title %}Config Validator - Drift Check{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>Configuration Drift Detection</h1>
+    <p class="text-muted">Checking device configurations against NetBox data</p>
+    
+    <hr>
+    
+    {% if devices %}
+        <div class="card">
+            <div class="card-header">
+                <strong>Devices with Primary IP</strong>
+            </div>
+            <div class="card-body">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Device</th>
+                            <th>Primary IP</th>
+                            <th>Platform</th>
+                            <th>Site</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for device in devices %}
+                        <tr>
+                            <td>
+                                <a href="{{ device.get_absolute_url }}">{{ device.name }}</a>
+                            </td>
+                            <td>
+                                {% if device.primary_ip4 %}
+                                    {{ device.primary_ip4.address.ip }}
+                                {% elif device.primary_ip6 %}
+                                    {{ device.primary_ip6.address.ip }}
+                                {% else %}
+                                    <span class="text-muted">N/A</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if device.platform %}
+                                    {{ device.platform.name }}
+                                {% else %}
+                                    <span class="text-muted">Not set</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if device.site %}
+                                    {{ device.site.name }}
+                                {% else %}
+                                    <span class="text-muted">N/A</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if device.status %}
+                                    {{ device.status }}
+                                {% else %}
+                                    <span class="text-muted">N/A</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer">
+                <span class="text-muted">Total devices: {{ devices|length }}</span>
+            </div>
+        </div>
+    {% else %}
+        <div class="alert alert-warning">
+            <h4>No Devices Found</h4>
+            <p>No devices with primary IP addresses found in NetBox. Please configure devices with primary IPs to use this feature.</p>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
