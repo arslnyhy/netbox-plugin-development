@@ -3,22 +3,9 @@ Helper functions for device connection and data collection.
 """
 from netmiko import ConnectHandler
 from netmiko.exceptions import NetmikoTimeoutException, NetmikoAuthenticationException
-import re
 
 
 def connect_to_device(device_ip, username='admin', password='letmein', device_type='cisco_ios'):
-    """
-    Connect to a network device using Netmiko.
-    
-    Args:
-        device_ip: IP address of the device
-        username: SSH username
-        password: SSH password
-        device_type: Netmiko device type (default: cisco_ios)
-    
-    Returns:
-        Netmiko connection object or None if connection fails
-    """
     try:
         device_params = {
             'device_type': device_type,
@@ -26,7 +13,6 @@ def connect_to_device(device_ip, username='admin', password='letmein', device_ty
             'username': username,
             'password': password,
             'timeout': 10,
-            'session_log': None,
         }
         
         connection = ConnectHandler(**device_params)
@@ -36,21 +22,11 @@ def connect_to_device(device_ip, username='admin', password='letmein', device_ty
         return None
     except NetmikoAuthenticationException:
         return None
-    except Exception as e:
+    except Exception:
         return None
 
 
 def get_device_interfaces(connection):
-    """
-    Get interface status from device using 'show ip interface brief'.
-    
-    Args:
-        connection: Active Netmiko connection
-    
-    Returns:
-        Dictionary with interface names as keys and status info as values
-        Example: {'GigabitEthernet0/0': {'status': 'up', 'protocol': 'up', 'ip': '10.1.1.1'}}
-    """
     interfaces = {}
     
     try:
@@ -85,20 +61,75 @@ def get_device_interfaces(connection):
         
         return interfaces
         
-    except Exception as e:
+    except Exception:
         return {}
 
 
 def disconnect_device(connection):
-    """
-    Safely disconnect from device.
-    
-    Args:
-        connection: Active Netmiko connection
-    """
     if connection:
         try:
             connection.disconnect()
-        except:
+        except Exception:
             pass
 
+
+def compare_interfaces(netbox_interfaces, device_interfaces):
+    """
+    Compare NetBox interfaces with actual device interfaces to detect drift.
+    """
+    comparison = []
+    
+    # Get all interface names from both sources
+    netbox_intf_dict = {intf.name: intf for intf in netbox_interfaces}
+    device_intf_names = set(device_interfaces.keys())
+    netbox_intf_names = set(netbox_intf_dict.keys())
+    
+    # Get all unique interface names from either NetBox or device
+    all_interface_names = netbox_intf_names.union(device_intf_names)
+    
+    for intf_name in sorted(all_interface_names):
+        in_netbox = intf_name in netbox_intf_names
+        in_device = intf_name in device_intf_names
+        
+        result = {
+            'name': intf_name,
+            'in_netbox': in_netbox,
+            'in_device': in_device,
+            'netbox_enabled': None,
+            'device_status': None,
+            'device_protocol': None,
+            'has_drift': False,
+            'drift_reason': None,
+        }
+        
+        # Get NetBox data
+        if in_netbox:
+            result['netbox_enabled'] = netbox_intf_dict[intf_name].enabled
+        
+        # Get device data
+        if in_device:
+            result['device_status'] = device_interfaces[intf_name]['status']
+            result['device_protocol'] = device_interfaces[intf_name]['protocol']
+        
+        # Determine drift
+        if in_netbox and in_device:
+            # Both exist - compare enabled vs status
+            netbox_should_be_up = result['netbox_enabled']
+            device_is_up = 'up' in result['device_status'] and result['device_protocol'] == 'up'
+            
+            if netbox_should_be_up and not device_is_up:
+                result['has_drift'] = True
+                result['drift_reason'] = 'NetBox expects UP, but device is DOWN'
+            elif not netbox_should_be_up and device_is_up:
+                result['has_drift'] = True
+                result['drift_reason'] = 'NetBox expects DOWN, but device is UP'
+        elif in_netbox and not in_device:
+            result['has_drift'] = True
+            result['drift_reason'] = 'Interface exists in NetBox but not on device'
+        elif not in_netbox and in_device:
+            result['has_drift'] = True
+            result['drift_reason'] = 'Interface exists on device but not in NetBox'
+        
+        comparison.append(result)
+    
+    return comparison

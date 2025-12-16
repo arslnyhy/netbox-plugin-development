@@ -5,8 +5,26 @@
 
 {% block content %}
 <div class="container">
-    <h1>Configuration Drift Detection</h1>
-    <p class="text-muted">Checking device configurations against NetBox data</p>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h1>Configuration Drift Detection</h1>
+            <p class="text-muted">Check device configurations against NetBox data on-demand</p>
+        </div>
+        <div>
+            <form method="post" style="display: inline;">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-primary">
+                    <i class="mdi mdi-refresh"></i> {% if device_data %}Check Again{% else %}Run Drift Check{% endif %}
+                </button>
+            </form>
+        </div>
+    </div>
+    
+    {% if check_time %}
+        <div class="alert alert-info">
+            <strong>Last checked:</strong> {{ check_time }}
+        </div>
+    {% endif %}
     
     <hr>
     
@@ -15,11 +33,16 @@
         <div class="card mb-3">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <strong>
-                    <a href="{{ data.device.get_absolute_url }}">{{ data.device.name }}</a>
+                    <a href="{{ data.device_url }}">{{ data.device_name }}</a>
                 </strong>
                 <span class="ms-3">
                     {% if data.connection_status == 'Connected' %}
                         <span class="badge bg-success text-white">✓ Connected</span>
+                        {% if data.drift_count > 0 %}
+                            <span class="badge bg-warning text-dark ms-2">{{ data.drift_count }} Drift{{ data.drift_count|pluralize }}</span>
+                        {% else %}
+                            <span class="badge bg-info text-white ms-2">No Drift</span>
+                        {% endif %}
                     {% elif data.connection_status == 'Failed' %}
                         <span class="badge bg-danger text-white">✗ Connection Failed</span>
                     {% else %}
@@ -31,24 +54,24 @@
                 <div class="row mb-3">
                     <div class="col-md-3">
                         <strong>Primary IP:</strong>
-                        {% if data.device.primary_ip4 %}
-                            {{ data.device.primary_ip4.address.ip }}
+                        {% if data.device_ip %}
+                            {{ data.device_ip }}
                         {% else %}
                             <span class="text-muted">N/A</span>
                         {% endif %}
                     </div>
                     <div class="col-md-3">
                         <strong>Platform:</strong>
-                        {% if data.device.platform %}
-                            {{ data.device.platform.name }}
+                        {% if data.platform %}
+                            {{ data.platform }}
                         {% else %}
                             <span class="text-muted">Not set</span>
                         {% endif %}
                     </div>
                     <div class="col-md-3">
                         <strong>Site:</strong>
-                        {% if data.device.site %}
-                            {{ data.device.site.name }}
+                        {% if data.site %}
+                            {{ data.site }}
                         {% else %}
                             <span class="text-muted">N/A</span>
                         {% endif %}
@@ -59,40 +82,49 @@
                     <div class="alert alert-warning mb-0">
                         <strong>Error:</strong> {{ data.error }}
                     </div>
-                {% elif data.interfaces %}
-                    <h5>Interfaces from Device</h5>
-                    <table class="table table-sm table-striped">
+                {% elif data.drift_comparison %}
+                    <h5>Configuration Drift Analysis</h5>
+                    <table class="table table-sm table-hover">
                         <thead>
                             <tr>
                                 <th>Interface</th>
-                                <th>IP Address</th>
-                                <th>Status</th>
-                                <th>Protocol</th>
+                                <th>NetBox Status</th>
+                                <th>Device Status</th>
+                                <th>Drift</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {% for intf_name, intf_data in data.interfaces.items %}
-                            <tr>
-                                <td><code>{{ intf_name }}</code></td>
+                            {% for intf in data.drift_comparison %}
+                            <tr {% if intf.has_drift %}style="background-color: rgba(255, 0, 0, 0.3);"{% endif %}>
+                                <td><code>{{ intf.name }}</code></td>
                                 <td>
-                                    {% if intf_data.ip %}
-                                        {{ intf_data.ip }}
+                                    {% if intf.in_netbox %}
+                                        {% if intf.netbox_enabled %}
+                                            <span class="badge bg-success text-white">Enabled</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary text-white">Disabled</span>
+                                        {% endif %}
                                     {% else %}
-                                        <span class="text-muted">unassigned</span>
+                                        <span class="text-muted">Not in NetBox</span>
                                     {% endif %}
                                 </td>
                                 <td>
-                                    {% if 'up' in intf_data.status %}
-                                        <span class="badge bg-success text-white">{{ intf_data.status }}</span>
+                                    {% if intf.in_device %}
+                                        {% if 'up' in intf.device_status and intf.device_protocol == 'up' %}
+                                            <span class="badge bg-success text-white">{{ intf.device_status }} / {{ intf.device_protocol }}</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary text-white">{{ intf.device_status }} / {{ intf.device_protocol }}</span>
+                                        {% endif %}
                                     {% else %}
-                                        <span class="badge bg-secondary text-white">{{ intf_data.status }}</span>
+                                        <span class="text-muted">Not on device</span>
                                     {% endif %}
                                 </td>
                                 <td>
-                                    {% if 'up' in intf_data.protocol %}
-                                        <span class="badge bg-success text-white">{{ intf_data.protocol }}</span>
+                                    {% if intf.has_drift %}
+                                        <span class="badge bg-danger text-white">✗ Drift</span>
+                                        <small class="d-block text-gray"><strong>{{ intf.drift_reason }}</strong></small>
                                     {% else %}
-                                        <span class="badge bg-secondary text-white">{{ intf_data.protocol }}</span>
+                                        <span class="badge bg-success text-white">✓ Match</span>
                                     {% endif %}
                                 </td>
                             </tr>
@@ -107,12 +139,20 @@
         <div class="alert alert-info mt-3">
             <strong>Total devices checked: {{ device_data|length }}</strong>
         </div>
-    {% else %}
+    {% elif device_data is not None %}
         <div class="alert alert-warning">
             <h4>No Devices Found</h4>
             <p>No devices with primary IP addresses found in NetBox. Please configure devices with primary IPs to use this feature.</p>
         </div>
+    {% else %}
+        <div class="card">
+            <div class="card-body text-center py-5">
+                <i class="mdi mdi-network-outline" style="font-size: 4rem; color: #6c757d;"></i>
+                <h3 class="mt-3">Ready to Check Configuration Drift</h3>
+                <p class="text-muted">Click "Run Drift Check" to connect to devices and compare their configurations with NetBox data.</p>
+                <p class="text-muted"><small>Note: This will establish SSH connections to all devices with primary IP addresses.</small></p>
+            </div>
+        </div>
     {% endif %}
 </div>
 {% endblock %}
-
