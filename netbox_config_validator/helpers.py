@@ -1,11 +1,17 @@
 """
 Helper functions for device connection and data collection.
 """
+import os
+from dotenv import load_dotenv
 from netmiko import ConnectHandler
 from netmiko.exceptions import NetmikoTimeoutException, NetmikoAuthenticationException
 
+load_dotenv()
 
-def connect_to_device(device_ip, username='admin', password='letmein', device_type='cisco_ios'):
+USERNAME = os.getenv("USERNAME")
+PASSWORD = os.getenv("PASSWORD")
+
+def connect_to_device(device_ip, username=USERNAME, password=PASSWORD, device_type='cisco_ios'):
     try:
         device_params = {
             'device_type': device_type,
